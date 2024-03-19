@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use crate::details::TwirpRouterBuilder;
-use crate::server::Timings;
+use crate::server::{self, Timings};
 use crate::{error, Client, Result, TwirpErrorResponse};
 
 pub async fn run_test_server(port: u16) -> JoinHandle<Result<(), std::io::Error>> {
@@ -34,11 +34,15 @@ pub fn test_api_router() -> Router {
     let test_router = TwirpRouterBuilder::new(api)
         .route(
             "/Ping",
-            |api: Arc<TestApiServer>, req: PingRequest| async move { api.ping(req).await },
+            |api: Arc<TestApiServer>, req: server::Request<PingRequest>| async move {
+                api.ping(req).await
+            },
         )
         .route(
             "/Boom",
-            |api: Arc<TestApiServer>, req: PingRequest| async move { api.boom(req).await },
+            |api: Arc<TestApiServer>, req: server::Request<PingRequest>| async move {
+                api.boom(req).await
+            },
         )
         .build();
 
@@ -81,11 +85,18 @@ pub struct TestApiServer;
 
 #[async_trait]
 impl TestApi for TestApiServer {
-    async fn ping(&self, req: PingRequest) -> Result<PingResponse, TwirpErrorResponse> {
-        Ok(PingResponse { name: req.name })
+    async fn ping(
+        &self,
+        request: server::Request<PingRequest>,
+    ) -> Result<server::Response<PingResponse>, TwirpErrorResponse> {
+        let req = request.into_inner();
+        Ok(server::Response::new(PingResponse { name: req.name }))
     }
 
-    async fn boom(&self, _: PingRequest) -> Result<PingResponse, TwirpErrorResponse> {
+    async fn boom(
+        &self,
+        _: server::Request<PingRequest>,
+    ) -> Result<server::Response<PingResponse>, TwirpErrorResponse> {
         Err(error::internal("boom!"))
     }
 }
@@ -111,8 +122,14 @@ impl TestApiClient for Client {
 
 #[async_trait]
 pub trait TestApi {
-    async fn ping(&self, req: PingRequest) -> Result<PingResponse, TwirpErrorResponse>;
-    async fn boom(&self, req: PingRequest) -> Result<PingResponse, TwirpErrorResponse>;
+    async fn ping(
+        &self,
+        req: server::Request<PingRequest>,
+    ) -> Result<server::Response<PingResponse>, TwirpErrorResponse>;
+    async fn boom(
+        &self,
+        req: server::Request<PingRequest>,
+    ) -> Result<server::Response<PingResponse>, TwirpErrorResponse>;
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

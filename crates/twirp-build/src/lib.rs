@@ -14,6 +14,10 @@ pub fn service_generator() -> Box<ServiceGenerator> {
 pub struct ServiceGenerator;
 
 impl prost_build::ServiceGenerator for ServiceGenerator {
+    fn finalize_package(&mut self, _package: &str, buf: &mut String) {
+        buf.insert_str(0, "use twirp::server::{Request, Response};\n");
+    }
+
     fn generate(&mut self, service: prost_build::Service, buf: &mut String) {
         let service_name = service.name;
         let service_fqn = format!("{}.{}", service.package, service.proto_name);
@@ -29,7 +33,7 @@ impl prost_build::ServiceGenerator for ServiceGenerator {
         for m in &service.methods {
             writeln!(
                 buf,
-                "    async fn {}(&self, req: {}) -> Result<{}, twirp::TwirpErrorResponse>;",
+                "    async fn {}(&self, req: Request<{}>) -> Result<Response<{}>, twirp::TwirpErrorResponse>;",
                 m.name, m.input_type, m.output_type,
             )
             .unwrap();
@@ -52,7 +56,7 @@ where
             let rust_method_name = &m.name;
             writeln!(
                 buf,
-                r#"        .route("/{uri}", |api: std::sync::Arc<T>, req: {req_type}| async move {{
+                r#"        .route("/{uri}", |api: std::sync::Arc<T>, req: Request<{req_type}>| async move {{
             api.{rust_method_name}(req).await
         }})"#,
             )

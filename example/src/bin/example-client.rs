@@ -60,12 +60,16 @@ struct RequestHeaders {
 impl Middleware for RequestHeaders {
     async fn handle(&self, mut req: Request, next: Next<'_>) -> twirp::client::Result<Response> {
         req.headers_mut().append("Request_id", "XYZ".try_into()?);
+        req.headers_mut().append("Starting_value", "41".try_into()?);
         if let Some(_hmac_key) = &self.hmac_key {
             req.headers_mut()
                 .append("Request-HMAC", "example:todo".try_into()?);
         }
         eprintln!("Set headers: {req:?}");
-        next.run(req).await
+        let response = next.run(req).await;
+        eprintln!("Received headers: {response:?}");
+
+        response
     }
 }
 

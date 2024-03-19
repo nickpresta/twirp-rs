@@ -33,8 +33,8 @@ where
     /// `|api: Arc<HaberdasherApiServer>, req: MakeHatRequest| async move { api.make_hat(req) }`.
     pub fn route<F, Fut, Req, Res>(self, url: &str, f: F) -> Self
     where
-        F: Fn(S, Req) -> Fut + Clone + Sync + Send + 'static,
-        Fut: Future<Output = Result<Res, TwirpErrorResponse>> + Send,
+        F: Fn(S, server::Request<Req>) -> Fut + Clone + Sync + Send + 'static,
+        Fut: Future<Output = Result<server::Response<Res>, TwirpErrorResponse>> + Send,
         Req: prost::Message + Default + serde::de::DeserializeOwned,
         Res: prost::Message + serde::Serialize,
     {
