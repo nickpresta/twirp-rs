@@ -8,7 +8,8 @@ use std::fmt::Debug;
 use axum::body::Body;
 use axum::response::IntoResponse;
 use futures::Future;
-use http::{Extensions, HeaderMap};
+pub use http::Extensions;
+use http::HeaderMap;
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -16,68 +17,6 @@ use tokio::time::{Duration, Instant};
 
 use crate::headers::{CONTENT_TYPE_JSON, CONTENT_TYPE_PROTOBUF};
 use crate::{error, serialize_proto_message, GenericError, TwirpErrorResponse};
-
-#[derive(Debug, Clone)]
-pub struct Request<T> {
-    message: T,
-    extensions: Extensions,
-}
-
-#[derive(Debug, Clone)]
-pub struct Response<T> {
-    message: T,
-    extensions: Extensions,
-}
-
-impl<T> Request<T> {
-    pub fn new(message: T) -> Self {
-        Request {
-            message,
-            extensions: Extensions::new(),
-        }
-    }
-
-    pub fn into_inner(self) -> T {
-        self.message
-    }
-
-    pub fn into_parts(self) -> (T, Extensions) {
-        (self.message, self.extensions)
-    }
-
-    pub fn extensions(&self) -> &Extensions {
-        &self.extensions
-    }
-
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        &mut self.extensions
-    }
-}
-
-impl<T> Response<T> {
-    pub fn new(message: T) -> Self {
-        Response {
-            message,
-            extensions: Extensions::new(),
-        }
-    }
-
-    pub fn into_inner(self) -> T {
-        self.message
-    }
-
-    pub fn into_parts(self) -> (T, Extensions) {
-        (self.message, self.extensions)
-    }
-
-    pub fn extensions(&self) -> &Extensions {
-        &self.extensions
-    }
-
-    pub fn extensions_mut(&mut self) -> &mut Extensions {
-        &mut self.extensions
-    }
-}
 
 // TODO: Properly implement JsonPb (de)serialization as it is slightly different
 // than standard JSON.
@@ -107,18 +46,20 @@ pub(crate) async fn handle_request<S, F, Fut, Req, Resp>(
     f: F,
 ) -> hyper::Response<Body>
 where
-    F: FnOnce(S, Request<Req>) -> Fut + Clone + Sync + Send + 'static,
-    Fut: Future<Output = Result<Response<Resp>, TwirpErrorResponse>> + Send,
+    F: FnOnce(S, &mut Extensions, Req) -> Fut + Clone + Sync + Send + 'static,
+    Fut: Future<Output = Result<Resp, TwirpErrorResponse>> + Send,
     Req: prost::Message + Default + serde::de::DeserializeOwned,
     Resp: prost::Message + serde::Serialize,
 {
-    let mut timings = req
-        .extensions()
+    let (mut parts, body) = req.into_parts();
+    let extensions = &mut parts.extensions;
+    let mut timings = extensions
         .get::<Timings>()
         .copied()
         .unwrap_or_else(|| Timings::new(Instant::now()));
 
-    let (req, resp_fmt) = match parse_request(req, &mut timings).await {
+    let headers = &parts.headers;
+    let (message, resp_fmt) = match parse_request(body, headers, &mut timings).await {
         Ok(pair) => pair,
         Err(err) => {
             // This is the only place we use tracing (would be nice to remove)
@@ -131,10 +72,10 @@ where
         }
     };
 
-    let res = f(service, req).await;
+    let res = f(service, extensions, message).await;
     timings.set_response_handled();
 
-    let mut resp = match write_response(res, resp_fmt) {
+    let mut resp = match write_response(res, extensions, resp_fmt) {
         Ok(resp) => resp,
         Err(err) => {
             let mut twirp_err = error::unknown("error serializing response");
@@ -144,19 +85,19 @@ where
     };
     timings.set_response_written();
 
+    // resp.extensions_mut().extend(extensions);
     resp.extensions_mut().insert(timings);
     resp
 }
 
 async fn parse_request<T>(
-    req: hyper::Request<Body>,
+    body: Body,
+    headers: &HeaderMap,
     timings: &mut Timings,
-) -> Result<(Request<T>, BodyFormat), GenericError>
+) -> Result<(T, BodyFormat), GenericError>
 where
     T: prost::Message + Default + DeserializeOwned,
 {
-    let (parts, body) = req.into_parts();
-    let headers = &parts.headers;
     let format = BodyFormat::from_content_type(headers);
     let bytes = body.collect().await?.to_bytes();
     timings.set_received();
@@ -166,13 +107,12 @@ where
     };
     timings.set_parsed();
 
-    let mut request = Request::new(message);
-    request.extensions_mut().extend(parts.extensions);
-    Ok((request, format))
+    Ok((message, format))
 }
 
 fn write_response<T>(
-    response: Result<Response<T>, TwirpErrorResponse>,
+    response: Result<T, TwirpErrorResponse>,
+    response_extensions: &Extensions,
     response_format: BodyFormat,
 ) -> Result<hyper::Response<Body>, GenericError>
 where
@@ -180,18 +120,17 @@ where
 {
     let res = match response {
         Ok(response) => {
-            let (message, response_extensions) = response.into_parts();
             let mut builder = hyper::Response::builder();
             if let Some(extensions_mut) = builder.extensions_mut() {
-                extensions_mut.extend(response_extensions);
+                extensions_mut.extend(response_extensions.clone());
             }
 
             match response_format {
                 BodyFormat::Pb => builder
                     .header(hyper::header::CONTENT_TYPE, CONTENT_TYPE_PROTOBUF)
-                    .body(Body::from(serialize_proto_message(message)))?,
+                    .body(Body::from(serialize_proto_message(response)))?,
                 BodyFormat::JsonPb => {
-                    let data = serde_json::to_string(&message)?;
+                    let data = serde_json::to_string(&response)?;
                     builder
                         .header(hyper::header::CONTENT_TYPE, CONTENT_TYPE_JSON)
                         .body(Body::from(data))?

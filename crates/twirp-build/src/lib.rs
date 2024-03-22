@@ -15,7 +15,7 @@ pub struct ServiceGenerator;
 
 impl prost_build::ServiceGenerator for ServiceGenerator {
     fn finalize_package(&mut self, _package: &str, buf: &mut String) {
-        buf.insert_str(0, "use twirp::server::{Request, Response};\n");
+        buf.insert_str(0, "use twirp::Extensions;\n");
     }
 
     fn generate(&mut self, service: prost_build::Service, buf: &mut String) {
@@ -33,7 +33,7 @@ impl prost_build::ServiceGenerator for ServiceGenerator {
         for m in &service.methods {
             writeln!(
                 buf,
-                "    async fn {}(&self, req: Request<{}>) -> Result<Response<{}>, twirp::TwirpErrorResponse>;",
+                "    async fn {}(self: std::sync::Arc<Self>, extensions: &mut Extensions, req: {}) -> Result<{}, twirp::TwirpErrorResponse>;",
                 m.name, m.input_type, m.output_type,
             )
             .unwrap();
@@ -47,7 +47,7 @@ impl prost_build::ServiceGenerator for ServiceGenerator {
 where
     T: {service_name} + Send + Sync + 'static,
 {{
-    twirp::details::TwirpRouterBuilder::new(api)"#,
+    twirp::details::TwirpRouterBuilder::new(api.clone())"#,
         )
         .unwrap();
         for m in &service.methods {
@@ -56,8 +56,11 @@ where
             let rust_method_name = &m.name;
             writeln!(
                 buf,
-                r#"        .route("/{uri}", |api: std::sync::Arc<T>, req: Request<{req_type}>| async move {{
-            api.{rust_method_name}(req).await
+                r#"        .route("/{uri}", move |api: std::sync::Arc<T>, extensions: &mut Extensions, req: {req_type}| {{
+                    async move {{
+                        let api = api.clone();
+                api.{rust_method_name}(extensions, req).await
+            }}
         }})"#,
             )
             .unwrap();

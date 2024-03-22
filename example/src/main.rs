@@ -9,7 +9,7 @@ use twirp::axum::{
     response::Response,
     routing::get,
 };
-use twirp::{invalid_argument, server, Router, TwirpErrorResponse};
+use twirp::{invalid_argument, Extensions, Router, TwirpErrorResponse};
 
 pub mod service {
     pub mod haberdash {
@@ -49,10 +49,10 @@ struct HaberdasherApiServer;
 #[async_trait]
 impl haberdash::HaberdasherApi for HaberdasherApiServer {
     async fn make_hat(
-        &self,
-        request: server::Request<MakeHatRequest>,
-    ) -> Result<server::Response<MakeHatResponse>, TwirpErrorResponse> {
-        let (req, extensions) = request.into_parts();
+        self: std::sync::Arc<Self>,
+        extensions: &mut Extensions,
+        req: MakeHatRequest,
+    ) -> Result<MakeHatResponse, TwirpErrorResponse> {
         let value = extensions.get::<MyMiddlewareValue>();
         println!("got request extension value: {:?}", value);
 
@@ -65,7 +65,7 @@ impl haberdash::HaberdasherApi for HaberdasherApiServer {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
 
-        let mut response = server::Response::new(MakeHatResponse {
+        let response = MakeHatResponse {
             color: "black".to_string(),
             name: "top hat".to_string(),
             size: req.inches,
@@ -73,8 +73,8 @@ impl haberdash::HaberdasherApi for HaberdasherApiServer {
                 seconds: ts.as_secs() as i64,
                 nanos: 0,
             }),
-        });
-        response.extensions_mut().insert(MyMiddlewareValue {
+        };
+        extensions.insert(MyMiddlewareValue {
             value: value.map_or_else(|| 0, |f| f.value) + 1,
         });
         Ok(response)
@@ -119,21 +119,19 @@ mod test {
 
     #[tokio::test]
     async fn success() {
-        let api = HaberdasherApiServer {};
-        let res = api
-            .make_hat(server::Request::new(MakeHatRequest { inches: 1 }))
-            .await;
+        let api = std::sync::Arc::new(HaberdasherApiServer {});
+        let extensions = &mut Extensions::new();
+        let res = api.make_hat(extensions, MakeHatRequest { inches: 1 }).await;
         assert!(res.is_ok());
-        let res = res.unwrap().into_inner();
+        let res = res.unwrap();
         assert_eq!(res.size, 1);
     }
 
     #[tokio::test]
     async fn invalid_request() {
-        let api = HaberdasherApiServer {};
-        let res = api
-            .make_hat(server::Request::new(MakeHatRequest { inches: 0 }))
-            .await;
+        let api = std::sync::Arc::new(HaberdasherApiServer {});
+        let extensions = &mut Extensions::new();
+        let res = api.make_hat(extensions, MakeHatRequest { inches: 0 }).await;
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert_eq!(err.code, TwirpErrorCode::InvalidArgument);

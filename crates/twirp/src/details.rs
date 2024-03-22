@@ -5,7 +5,7 @@ use std::future::Future;
 use axum::extract::{Request, State};
 use axum::Router;
 
-use crate::{server, TwirpErrorResponse};
+use crate::{server, Extensions, TwirpErrorResponse};
 
 /// Builder object used by generated code to build a Twirp service.
 ///
@@ -30,11 +30,11 @@ where
     /// Add a handler for an `rpc` to the router.
     ///
     /// The generated code passes a closure that calls the method, like
-    /// `|api: Arc<HaberdasherApiServer>, req: MakeHatRequest| async move { api.make_hat(req) }`.
+    /// `|api: Arc<HaberdasherApiServer>, extensions: &mut Extensions, req: MakeHatRequest| async move { api.make_hat(extensions, req) }`.
     pub fn route<F, Fut, Req, Res>(self, url: &str, f: F) -> Self
     where
-        F: Fn(S, server::Request<Req>) -> Fut + Clone + Sync + Send + 'static,
-        Fut: Future<Output = Result<server::Response<Res>, TwirpErrorResponse>> + Send,
+        F: Fn(S, &mut Extensions, Req) -> Fut + Clone + Sync + Send + 'static,
+        Fut: Future<Output = Result<Res, TwirpErrorResponse>> + Send,
         Req: prost::Message + Default + serde::de::DeserializeOwned,
         Res: prost::Message + serde::Serialize,
     {

@@ -11,7 +11,7 @@ pub mod details;
 
 pub use client::{Client, ClientBuilder, ClientError, Middleware, Next, Result};
 pub use error::*; // many constructors like `invalid_argument()`
-pub use server::{Request, Response};
+pub use server::Extensions;
 
 // Re-export this crate's dependencies that users are likely to code against. These can be used to
 // import the exact versions of these libraries `twirp` is built with -- useful if your project is
