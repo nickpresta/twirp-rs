@@ -8,6 +8,7 @@ use std::fmt::Debug;
 use axum::body::Body;
 use axum::response::IntoResponse;
 use futures::Future;
+use http::Extensions;
 use http_body_util::BodyExt;
 use hyper::{header, Request, Response};
 use serde::de::DeserializeOwned;
@@ -46,7 +47,7 @@ pub(crate) async fn handle_request<S, F, Fut, Req, Resp>(
     f: F,
 ) -> Response<Body>
 where
-    F: FnOnce(S, Req) -> Fut + Clone + Sync + Send + 'static,
+    F: FnOnce(S, Extensions, Req) -> Fut + Clone + Sync + Send + 'static,
     Fut: Future<Output = Result<Resp, TwirpErrorResponse>> + Send,
     Req: prost::Message + Default + serde::de::DeserializeOwned,
     Resp: prost::Message + serde::Serialize,
@@ -56,6 +57,8 @@ where
         .get::<Timings>()
         .copied()
         .unwrap_or_else(|| Timings::new(Instant::now()));
+
+    let ext = req.extensions().clone();
 
     let (req, resp_fmt) = match parse_request(req, &mut timings).await {
         Ok(pair) => pair,
@@ -70,7 +73,7 @@ where
         }
     };
 
-    let res = f(service, req).await;
+    let res = f(service, ext, req).await;
     timings.set_response_handled();
 
     let mut resp = match write_response(res, resp_fmt) {

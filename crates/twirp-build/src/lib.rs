@@ -29,7 +29,7 @@ impl prost_build::ServiceGenerator for ServiceGenerator {
         for m in &service.methods {
             writeln!(
                 buf,
-                "    async fn {}(&self, req: {}) -> Result<{}, twirp::TwirpErrorResponse>;",
+                "    async fn {}(&self, exts: twirp::Extensions, req: {}) -> Result<{}, twirp::TwirpErrorResponse>;",
                 m.name, m.input_type, m.output_type,
             )
             .unwrap();
@@ -52,8 +52,8 @@ where
             let rust_method_name = &m.name;
             writeln!(
                 buf,
-                r#"        .route("/{uri}", |api: std::sync::Arc<T>, req: {req_type}| async move {{
-            api.{rust_method_name}(req).await
+                r#"        .route("/{uri}", |api: std::sync::Arc<T>, exts: twirp::Extensions, req: {req_type}| async move {{
+            api.{rust_method_name}(exts, req).await
         }})"#,
             )
             .unwrap();

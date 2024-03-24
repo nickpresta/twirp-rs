@@ -5,6 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::Router;
+use http::Extensions;
 use http_body_util::BodyExt;
 use hyper::Request;
 use serde::de::DeserializeOwned;
@@ -34,11 +35,15 @@ pub fn test_api_router() -> Router {
     let test_router = TwirpRouterBuilder::new(api)
         .route(
             "/Ping",
-            |api: Arc<TestApiServer>, req: PingRequest| async move { api.ping(req).await },
+            |api: Arc<TestApiServer>, exts: Extensions, req: PingRequest| async move {
+                api.ping(exts, req).await
+            },
         )
         .route(
             "/Boom",
-            |api: Arc<TestApiServer>, req: PingRequest| async move { api.boom(req).await },
+            |api: Arc<TestApiServer>, exts: Extensions, req: PingRequest| async move {
+                api.boom(exts, req).await
+            },
         )
         .build();
 
@@ -81,11 +86,19 @@ pub struct TestApiServer;
 
 #[async_trait]
 impl TestApi for TestApiServer {
-    async fn ping(&self, req: PingRequest) -> Result<PingResponse, TwirpErrorResponse> {
+    async fn ping(
+        &self,
+        _exts: Extensions,
+        req: PingRequest,
+    ) -> Result<PingResponse, TwirpErrorResponse> {
         Ok(PingResponse { name: req.name })
     }
 
-    async fn boom(&self, _: PingRequest) -> Result<PingResponse, TwirpErrorResponse> {
+    async fn boom(
+        &self,
+        _exts: Extensions,
+        _: PingRequest,
+    ) -> Result<PingResponse, TwirpErrorResponse> {
         Err(error::internal("boom!"))
     }
 }
@@ -111,8 +124,16 @@ impl TestApiClient for Client {
 
 #[async_trait]
 pub trait TestApi {
-    async fn ping(&self, req: PingRequest) -> Result<PingResponse, TwirpErrorResponse>;
-    async fn boom(&self, req: PingRequest) -> Result<PingResponse, TwirpErrorResponse>;
+    async fn ping(
+        &self,
+        exts: Extensions,
+        req: PingRequest,
+    ) -> Result<PingResponse, TwirpErrorResponse>;
+    async fn boom(
+        &self,
+        exts: Extensions,
+        req: PingRequest,
+    ) -> Result<PingResponse, TwirpErrorResponse>;
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

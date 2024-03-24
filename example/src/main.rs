@@ -3,6 +3,9 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use twirp::async_trait::async_trait;
+use twirp::axum::body::Body;
+use twirp::axum::http;
+use twirp::axum::middleware::{self, Next};
 use twirp::axum::routing::get;
 use twirp::{invalid_argument, Router, TwirpErrorResponse};
 
@@ -22,7 +25,14 @@ async fn ping() -> &'static str {
 #[tokio::main]
 pub async fn main() {
     let api_impl = Arc::new(HaberdasherApiServer {});
-    let twirp_routes = Router::new().nest(haberdash::SERVICE_FQN, haberdash::router(api_impl));
+    let middleware = twirp::tower::builder::ServiceBuilder::new()
+        .layer(middleware::from_fn(request_id_middleware));
+    let twirp_routes = Router::new()
+        .nest(
+            haberdash::SERVICE_FQN,
+            haberdash::router(api_impl).fallback(twirp::server::not_found_handler),
+        )
+        .layer(middleware);
     let app = Router::new()
         .nest("/twirp", twirp_routes)
         .route("/_ping", get(ping))
@@ -42,12 +52,22 @@ struct HaberdasherApiServer;
 
 #[async_trait]
 impl haberdash::HaberdasherApi for HaberdasherApiServer {
-    async fn make_hat(&self, req: MakeHatRequest) -> Result<MakeHatResponse, TwirpErrorResponse> {
+    async fn make_hat(
+        &self,
+        exts: twirp::Extensions,
+        req: MakeHatRequest,
+    ) -> Result<MakeHatResponse, TwirpErrorResponse> {
         if req.inches == 0 {
             return Err(invalid_argument("inches"));
         }
 
-        println!("got {:?}", req);
+        let rid = if let Some(id) = exts.get::<RequestId>() {
+            id.clone()
+        } else {
+            RequestId("didn't find a request_id".to_string())
+        };
+
+        println!("{rid:?} got {:?}", req);
         let ts = std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -61,6 +81,26 @@ impl haberdash::HaberdasherApi for HaberdasherApiServer {
             }),
         })
     }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Default)]
+struct RequestId(String);
+
+async fn request_id_middleware(
+    mut request: http::Request<Body>,
+    next: Next,
+) -> http::Response<Body> {
+    let id = if let Some(rid) = request
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+    {
+        RequestId(rid.to_string())
+    } else {
+        RequestId("none".to_string())
+    };
+    request.extensions_mut().insert(id);
+    next.run(request).await
 }
 
 #[cfg(test)]
@@ -77,7 +117,8 @@ mod test {
     #[tokio::test]
     async fn success() {
         let api = HaberdasherApiServer {};
-        let res = api.make_hat(MakeHatRequest { inches: 1 }).await;
+        let exts = twirp::Extensions::new();
+        let res = api.make_hat(exts, MakeHatRequest { inches: 1 }).await;
         assert!(res.is_ok());
         let res = res.unwrap();
         assert_eq!(res.size, 1);
@@ -86,7 +127,8 @@ mod test {
     #[tokio::test]
     async fn invalid_request() {
         let api = HaberdasherApiServer {};
-        let res = api.make_hat(MakeHatRequest { inches: 0 }).await;
+        let exts = twirp::Extensions::new();
+        let res = api.make_hat(exts, MakeHatRequest { inches: 0 }).await;
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert_eq!(err.code, TwirpErrorCode::InvalidArgument);
