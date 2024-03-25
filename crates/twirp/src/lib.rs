@@ -1,4 +1,5 @@
 pub mod client;
+pub mod context;
 pub mod error;
 pub mod headers;
 pub mod server;
@@ -10,6 +11,7 @@ pub mod test;
 pub mod details;
 
 pub use client::{Client, ClientBuilder, ClientError, Middleware, Next, Result};
+pub use context::Context;
 pub use error::*; // many constructors like `invalid_argument()`
 pub use http::Extensions;
 

@@ -4,6 +4,7 @@
 //! `twirp-build`. See <https://github.com/github/twirp-rs#usage> for details and an example.
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use axum::body::Body;
 use axum::response::IntoResponse;
@@ -16,7 +17,7 @@ use serde::Serialize;
 use tokio::time::{Duration, Instant};
 
 use crate::headers::{CONTENT_TYPE_JSON, CONTENT_TYPE_PROTOBUF};
-use crate::{error, serialize_proto_message, GenericError, TwirpErrorResponse};
+use crate::{error, serialize_proto_message, Context, GenericError, TwirpErrorResponse};
 
 // TODO: Properly implement JsonPb (de)serialization as it is slightly different
 // than standard JSON.
@@ -47,7 +48,7 @@ pub(crate) async fn handle_request<S, F, Fut, Req, Resp>(
     f: F,
 ) -> Response<Body>
 where
-    F: FnOnce(S, Extensions, Req) -> Fut + Clone + Sync + Send + 'static,
+    F: FnOnce(S, Arc<Context>, Req) -> Fut + Clone + Sync + Send + 'static,
     Fut: Future<Output = Result<Resp, TwirpErrorResponse>> + Send,
     Req: prost::Message + Default + serde::de::DeserializeOwned,
     Resp: prost::Message + serde::Serialize,
@@ -58,7 +59,7 @@ where
         .copied()
         .unwrap_or_else(|| Timings::new(Instant::now()));
 
-    let (req, mut exts, resp_fmt) = match parse_request(req, &mut timings).await {
+    let (req, exts, resp_fmt) = match parse_request(req, &mut timings).await {
         Ok(pair) => pair,
         Err(err) => {
             // This is the only place we use tracing (would be nice to remove)
@@ -71,7 +72,8 @@ where
         }
     };
 
-    let res = f(service, ext, req).await;
+    let ctx = Arc::new(Context::new(exts));
+    let res = f(service, ctx.clone(), req).await;
     timings.set_response_handled();
 
     let mut resp = match write_response(res, resp_fmt) {
@@ -84,6 +86,14 @@ where
     };
     timings.set_response_written();
 
+    // NB: Include all context extensions in the response.
+    let exts = ctx
+        .clone()
+        .extensions
+        .lock()
+        .expect("mutex poisoned")
+        .clone();
+    resp.extensions_mut().extend(exts);
     resp.extensions_mut().insert(timings);
     resp
 }
@@ -235,6 +245,7 @@ mod tests {
     use super::*;
     use crate::test::*;
 
+    use axum::middleware::{self, Next};
     use tower::Service;
 
     fn timings() -> Timings {
@@ -300,5 +311,31 @@ mod tests {
         assert!(resp.status().is_server_error(), "{:?}", resp);
         let data = read_err_body(resp.into_body()).await;
         assert_eq!(data, error::internal("boom!"));
+    }
+
+    #[tokio::test]
+    async fn test_middleware() {
+        let mut router = test_api_router().layer(middleware::from_fn(request_id_middleware));
+        let resp = router.call(gen_ping_request("hi")).await.unwrap();
+        assert!(resp.status().is_success(), "{:?}", resp);
+        let data: PingResponse = read_json_body(resp.into_body()).await;
+        assert_eq!(&data.name, "hi-none");
+    }
+
+    async fn request_id_middleware(
+        mut request: http::Request<Body>,
+        next: Next,
+    ) -> http::Response<Body> {
+        let id = if let Some(rid) = request
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+        {
+            RequestId(rid.to_string())
+        } else {
+            RequestId("none".to_string())
+        };
+        request.extensions_mut().insert(id);
+        next.run(request).await
     }
 }

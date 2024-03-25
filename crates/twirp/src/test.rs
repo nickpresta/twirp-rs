@@ -5,7 +5,6 @@ use std::time::Duration;
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::Router;
-use http::Extensions;
 use http_body_util::BodyExt;
 use hyper::Request;
 use serde::de::DeserializeOwned;
@@ -14,7 +13,7 @@ use tokio::time::Instant;
 
 use crate::details::TwirpRouterBuilder;
 use crate::server::Timings;
-use crate::{error, Client, Result, TwirpErrorResponse};
+use crate::{error, Client, Context, Result, TwirpErrorResponse};
 
 pub async fn run_test_server(port: u16) -> JoinHandle<Result<(), std::io::Error>> {
     let router = test_api_router();
@@ -35,14 +34,14 @@ pub fn test_api_router() -> Router {
     let test_router = TwirpRouterBuilder::new(api)
         .route(
             "/Ping",
-            |api: Arc<TestApiServer>, exts: Extensions, req: PingRequest| async move {
-                api.ping(exts, req).await
+            |api: Arc<TestApiServer>, ctx: Arc<Context>, req: PingRequest| async move {
+                api.ping(ctx, req).await
             },
         )
         .route(
             "/Boom",
-            |api: Arc<TestApiServer>, exts: Extensions, req: PingRequest| async move {
-                api.boom(exts, req).await
+            |api: Arc<TestApiServer>, ctx: Arc<Context>, req: PingRequest| async move {
+                api.boom(ctx, req).await
             },
         )
         .build();
@@ -88,20 +87,34 @@ pub struct TestApiServer;
 impl TestApi for TestApiServer {
     async fn ping(
         &self,
-        _exts: Extensions,
+        ctx: Arc<Context>,
         req: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse> {
-        Ok(PingResponse { name: req.name })
+        if let Some(RequestId(rid)) = ctx
+            .extensions
+            .lock()
+            .expect("mutex poisoned")
+            .get::<RequestId>()
+        {
+            Ok(PingResponse {
+                name: format!("{}-{}", req.name, rid),
+            })
+        } else {
+            Ok(PingResponse { name: req.name })
+        }
     }
 
     async fn boom(
         &self,
-        _exts: Extensions,
+        _ctx: Arc<Context>,
         _: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse> {
         Err(error::internal("boom!"))
     }
 }
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Default)]
+pub struct RequestId(pub String);
 
 // Small test twirp services (this would usually be generated with twirp-build)
 #[async_trait]
@@ -126,12 +139,12 @@ impl TestApiClient for Client {
 pub trait TestApi {
     async fn ping(
         &self,
-        exts: Extensions,
+        ctx: Arc<Context>,
         req: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse>;
     async fn boom(
         &self,
-        exts: Extensions,
+        ctx: Arc<Context>,
         req: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse>;
 }
