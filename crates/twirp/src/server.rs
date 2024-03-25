@@ -58,9 +58,7 @@ where
         .copied()
         .unwrap_or_else(|| Timings::new(Instant::now()));
 
-    let ext = req.extensions().clone();
-
-    let (req, resp_fmt) = match parse_request(req, &mut timings).await {
+    let (req, mut exts, resp_fmt) = match parse_request(req, &mut timings).await {
         Ok(pair) => pair,
         Err(err) => {
             // This is the only place we use tracing (would be nice to remove)
@@ -93,19 +91,20 @@ where
 async fn parse_request<T>(
     req: Request<Body>,
     timings: &mut Timings,
-) -> Result<(T, BodyFormat), GenericError>
+) -> Result<(T, Extensions, BodyFormat), GenericError>
 where
     T: prost::Message + Default + DeserializeOwned,
 {
     let format = BodyFormat::from_content_type(&req);
-    let bytes = req.into_body().collect().await?.to_bytes();
+    let (parts, body) = req.into_parts();
+    let bytes = body.collect().await?.to_bytes();
     timings.set_received();
     let request = match format {
         BodyFormat::Pb => T::decode(&bytes[..])?,
         BodyFormat::JsonPb => serde_json::from_slice(&bytes)?,
     };
     timings.set_parsed();
-    Ok((request, format))
+    Ok((request, parts.extensions, format))
 }
 
 fn write_response<T>(
