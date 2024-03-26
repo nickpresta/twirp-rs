@@ -4,6 +4,7 @@
 //! `twirp-build`. See <https://github.com/github/twirp-rs#usage> for details and an example.
 
 use std::fmt::Debug;
+use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::response::IntoResponse;
@@ -71,7 +72,8 @@ where
         }
     };
 
-    let ctx = Context::new(exts);
+    let resp_exts = Arc::new(Mutex::new(Extensions::new()));
+    let ctx = Context::new(exts, resp_exts.clone());
     let res = f(service, ctx, req).await;
     timings.set_response_handled();
 
@@ -86,13 +88,8 @@ where
     timings.set_response_written();
 
     // NB: Include all context extensions in the response.
-    // let exts = ctx
-    //     .clone()
-    //     .extensions
-    //     .lock()
-    //     .expect("mutex poisoned")
-    //     .clone();
-    // resp.extensions_mut().extend(exts);
+    resp.extensions_mut()
+        .extend(resp_exts.lock().expect("mutex poisoned").clone());
     resp.extensions_mut().insert(timings);
     resp
 }

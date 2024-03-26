@@ -61,14 +61,14 @@ impl haberdash::HaberdasherApi for HaberdasherApiServer {
             return Err(invalid_argument("inches"));
         }
 
-        let rid = if let Some(id) = ctx.extensions.get::<RequestId>() {
+        let rid = if let Some(id) = ctx.get::<RequestId>() {
             id.clone()
         } else {
             RequestId("didn't find a request_id".to_string())
         };
 
         println!("{rid:?} got {:?}", req);
-        ctx.resp_extensions.insert::<ResponseInfo>(ResponseInfo(1));
+        ctx.insert::<ResponseInfo>(ResponseInfo(1));
         let ts = std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -123,7 +123,7 @@ mod test {
     #[tokio::test]
     async fn success() {
         let api = HaberdasherApiServer {};
-        let ctx = Arc::new(twirp::Context::default());
+        let ctx = twirp::Context::default();
         let res = api.make_hat(ctx, MakeHatRequest { inches: 1 }).await;
         assert!(res.is_ok());
         let res = res.unwrap();
@@ -133,7 +133,7 @@ mod test {
     #[tokio::test]
     async fn invalid_request() {
         let api = HaberdasherApiServer {};
-        let ctx = Arc::new(twirp::Context::default());
+        let ctx = twirp::Context::default();
         let res = api.make_hat(ctx, MakeHatRequest { inches: 0 }).await;
         assert!(res.is_err());
         let err = res.unwrap_err();

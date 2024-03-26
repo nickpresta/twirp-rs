@@ -90,12 +90,7 @@ impl TestApi for TestApiServer {
         ctx: Context,
         req: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse> {
-        if let Some(RequestId(rid)) = ctx
-            .extensions
-            .lock()
-            .expect("mutex poisoned")
-            .get::<RequestId>()
-        {
+        if let Some(RequestId(rid)) = ctx.get::<RequestId>() {
             Ok(PingResponse {
                 name: format!("{}-{}", req.name, rid),
             })
