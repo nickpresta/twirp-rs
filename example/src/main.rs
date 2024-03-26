@@ -54,29 +54,21 @@ struct HaberdasherApiServer;
 impl haberdash::HaberdasherApi for HaberdasherApiServer {
     async fn make_hat(
         &self,
-        ctx: Arc<Context>,
+        ctx: Context,
         req: MakeHatRequest,
     ) -> Result<MakeHatResponse, TwirpErrorResponse> {
         if req.inches == 0 {
             return Err(invalid_argument("inches"));
         }
 
-        let rid = if let Some(id) = ctx
-            .extensions
-            .lock()
-            .expect("mutex poisoned")
-            .get::<RequestId>()
-        {
+        let rid = if let Some(id) = ctx.extensions.get::<RequestId>() {
             id.clone()
         } else {
             RequestId("didn't find a request_id".to_string())
         };
 
         println!("{rid:?} got {:?}", req);
-        ctx.extensions
-            .lock()
-            .expect("mutex poisoned")
-            .insert::<ResponseInfo>(ResponseInfo(1));
+        ctx.resp_extensions.insert::<ResponseInfo>(ResponseInfo(1));
         let ts = std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();

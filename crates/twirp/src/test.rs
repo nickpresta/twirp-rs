@@ -34,13 +34,13 @@ pub fn test_api_router() -> Router {
     let test_router = TwirpRouterBuilder::new(api)
         .route(
             "/Ping",
-            |api: Arc<TestApiServer>, ctx: Arc<Context>, req: PingRequest| async move {
+            |api: Arc<TestApiServer>, ctx: Context, req: PingRequest| async move {
                 api.ping(ctx, req).await
             },
         )
         .route(
             "/Boom",
-            |api: Arc<TestApiServer>, ctx: Arc<Context>, req: PingRequest| async move {
+            |api: Arc<TestApiServer>, ctx: Context, req: PingRequest| async move {
                 api.boom(ctx, req).await
             },
         )
@@ -87,7 +87,7 @@ pub struct TestApiServer;
 impl TestApi for TestApiServer {
     async fn ping(
         &self,
-        ctx: Arc<Context>,
+        ctx: Context,
         req: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse> {
         if let Some(RequestId(rid)) = ctx
@@ -106,7 +106,7 @@ impl TestApi for TestApiServer {
 
     async fn boom(
         &self,
-        _ctx: Arc<Context>,
+        _ctx: Context,
         _: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse> {
         Err(error::internal("boom!"))
@@ -139,12 +139,12 @@ impl TestApiClient for Client {
 pub trait TestApi {
     async fn ping(
         &self,
-        ctx: Arc<Context>,
+        ctx: Context,
         req: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse>;
     async fn boom(
         &self,
-        ctx: Arc<Context>,
+        ctx: Context,
         req: PingRequest,
     ) -> Result<PingResponse, TwirpErrorResponse>;
 }
