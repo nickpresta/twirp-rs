@@ -28,10 +28,7 @@ pub async fn main() {
     let middleware = twirp::tower::builder::ServiceBuilder::new()
         .layer(middleware::from_fn(request_id_middleware));
     let twirp_routes = Router::new()
-        .nest(
-            haberdash::SERVICE_FQN,
-            haberdash::router(api_impl).fallback(twirp::server::not_found_handler),
-        )
+        .nest(haberdash::SERVICE_FQN, haberdash::router(api_impl))
         .layer(middleware);
     let app = Router::new()
         .nest("/twirp", twirp_routes)
