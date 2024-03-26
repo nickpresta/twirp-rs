@@ -4,7 +4,6 @@
 //! `twirp-build`. See <https://github.com/github/twirp-rs#usage> for details and an example.
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use axum::body::Body;
 use axum::response::IntoResponse;
@@ -48,7 +47,7 @@ pub(crate) async fn handle_request<S, F, Fut, Req, Resp>(
     f: F,
 ) -> Response<Body>
 where
-    F: FnOnce(S, Arc<Context>, Req) -> Fut + Clone + Sync + Send + 'static,
+    F: FnOnce(S, &mut Context, Req) -> Fut + Clone + Sync + Send + 'static,
     Fut: Future<Output = Result<Resp, TwirpErrorResponse>> + Send,
     Req: prost::Message + Default + serde::de::DeserializeOwned,
     Resp: prost::Message + serde::Serialize,
@@ -72,8 +71,8 @@ where
         }
     };
 
-    let ctx = Arc::new(Context::new(exts));
-    let res = f(service, ctx.clone(), req).await;
+    let ctx = &mut Context::new(exts);
+    let res = f(service, ctx, req).await;
     timings.set_response_handled();
 
     let mut resp = match write_response(res, resp_fmt) {
@@ -87,12 +86,7 @@ where
     timings.set_response_written();
 
     // NB: Include all context extensions in the response.
-    let exts = ctx
-        .clone()
-        .extensions
-        .lock()
-        .expect("mutex poisoned")
-        .clone();
+    let exts = ctx.extensions.clone();
     resp.extensions_mut().extend(exts);
     resp.extensions_mut().insert(timings);
     resp

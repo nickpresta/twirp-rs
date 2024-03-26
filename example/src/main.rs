@@ -54,29 +54,22 @@ struct HaberdasherApiServer;
 impl haberdash::HaberdasherApi for HaberdasherApiServer {
     async fn make_hat(
         &self,
-        ctx: Arc<Context>,
+        ctx: &mut Context,
         req: MakeHatRequest,
     ) -> Result<MakeHatResponse, TwirpErrorResponse> {
         if req.inches == 0 {
             return Err(invalid_argument("inches"));
         }
 
-        let rid = if let Some(id) = ctx
-            .extensions
-            .lock()
-            .expect("mutex poisoned")
-            .get::<RequestId>()
-        {
+        let extensions = &ctx.extensions;
+        let rid = if let Some(id) = extensions.get::<RequestId>() {
             id.clone()
         } else {
             RequestId("didn't find a request_id".to_string())
         };
 
         println!("{rid:?} got {:?}", req);
-        ctx.extensions
-            .lock()
-            .expect("mutex poisoned")
-            .insert::<ResponseInfo>(ResponseInfo(1));
+        ctx.extensions.insert::<ResponseInfo>(ResponseInfo(42));
         let ts = std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -114,7 +107,17 @@ async fn request_id_middleware(
         RequestId("none".to_string())
     };
     request.extensions_mut().insert(id);
-    next.run(request).await
+
+    let mut response = next.run(request).await;
+    let info = response.extensions().get::<ResponseInfo>().unwrap_or(&ResponseInfo(0)).0;
+
+    response.headers_mut().insert(
+        "x-response-info",
+        info.into(),
+    );
+
+    response
+
 }
 
 #[cfg(test)]
@@ -131,8 +134,8 @@ mod test {
     #[tokio::test]
     async fn success() {
         let api = HaberdasherApiServer {};
-        let ctx = Arc::new(twirp::Context::default());
-        let res = api.make_hat(ctx, MakeHatRequest { inches: 1 }).await;
+        let mut ctx = twirp::Context::default();
+        let res = api.make_hat(&mut ctx, MakeHatRequest { inches: 1 }).await;
         assert!(res.is_ok());
         let res = res.unwrap();
         assert_eq!(res.size, 1);
@@ -141,8 +144,8 @@ mod test {
     #[tokio::test]
     async fn invalid_request() {
         let api = HaberdasherApiServer {};
-        let ctx = Arc::new(twirp::Context::default());
-        let res = api.make_hat(ctx, MakeHatRequest { inches: 0 }).await;
+        let mut ctx = twirp::Context::default();
+        let res = api.make_hat(&mut ctx, MakeHatRequest { inches: 0 }).await;
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert_eq!(err.code, TwirpErrorCode::InvalidArgument);

@@ -1,16 +1,12 @@
-use std::sync::Mutex;
-
 use http::Extensions;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Context {
-    pub extensions: Mutex<Extensions>,
+    pub extensions: Extensions,
 }
 
 impl Context {
     pub fn new(extensions: Extensions) -> Self {
-        Self {
-            extensions: Mutex::new(extensions),
-        }
+        Self { extensions }
     }
 }
