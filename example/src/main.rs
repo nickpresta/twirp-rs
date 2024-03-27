@@ -65,7 +65,7 @@ impl haberdash::HaberdasherApi for HaberdasherApiServer {
         };
 
         println!("{rid:?} got {:?}", req);
-        ctx.insert::<ResponseInfo>(ResponseInfo(1));
+        ctx.insert::<ResponseInfo>(ResponseInfo(42));
         let ts = std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -103,7 +103,16 @@ async fn request_id_middleware(
         RequestId("none".to_string())
     };
     request.extensions_mut().insert(id);
-    next.run(request).await
+
+    let mut res = next.run(request).await;
+    let extensions = res.extensions().clone();
+
+    res.headers_mut().insert(
+        "x-response-info",
+        extensions.get::<ResponseInfo>().unwrap().0.into()
+    );
+
+    res
 }
 
 #[cfg(test)]
